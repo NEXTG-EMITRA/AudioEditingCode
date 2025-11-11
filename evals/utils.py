@@ -127,7 +127,8 @@ def calc_scores(clap_ckpt_name: str,
                 win_length: Optional[int] = None,
                 overlap: float = 0.1,
                 method: str = 'mean',
-                clap_checkpoint_path: str = 'clap/pretrained') -> Scores:
+                clap_checkpoint_path: str = 'clap/pretrained',
+                musicgen_full_duration: bool = True) -> Scores:
     """Calculate the CLAP and LPAPS scores for the given directories
     Note: This function is built for our used directory structure, it's here as an example.
 
@@ -143,6 +144,7 @@ def calc_scores(clap_ckpt_name: str,
     :param float overlap: fraction of overlap between windows, defaults to 0.1
     :param str method: method to use to combine scores, defaults to 'mean', choices=['mean', 'median', 'max', 'min']
     :param str clap_checkpoint_path: the path where CLAP's weights are stored, defaults to 'clap/pretrained'
+    :param bool musicgen_full_duration: if True evaluate MusicGen files over full duration (no windowing)
     :return Scores: 
     """
     clap_model = CLAPTextConsistencyMetric(model_path=os.path.join(clap_checkpoint_path, clap_ckpt_name),
@@ -183,7 +185,8 @@ def calc_scores(clap_ckpt_name: str,
         all_clap_ddim = prev_pt.ddim.clap
         all_lpaps_ddim = prev_pt.ddim.lpaps
 
-    if ours_dirs is str:
+    # If the user passed a single path (string), wrap into lists
+    if isinstance(ours_dirs, str):
         ours_dirs = [ours_dirs]
         sdedit_dirs = [sdedit_dirs]
         ddim_dirs = [ddim_dirs]
@@ -204,7 +207,7 @@ def calc_scores(clap_ckpt_name: str,
             orig_aud, orig_aud_sr = torchaudio.load(orig_aud_path)
 
             # LPAPS relative to itself
-            if all_lpaps_orig[audio_input] is not float:
+            if not isinstance(all_lpaps_orig[audio_input], float):
                 all_lpaps_orig[audio_input] = calc_lpaps_win(lpaps_model, orig_aud, orig_aud, orig_aud_sr, orig_aud_sr,
                                                              win_length, method, overlap, device)
 
@@ -348,6 +351,9 @@ def calc_scores(clap_ckpt_name: str,
                             if score_dict[audio_input].get(target_prompt) is None:
                                 score_dict[audio_input][target_prompt] = []
 
+                        # decide musicgen window length: full duration (None) or follow global win_length
+                        mg_win_length = None if musicgen_full_duration else win_length
+
                         # TODO WHY DOES THIS HAPPEN
                         if not len([x for x in all_clap_musicgen[audio_input][target_prompt]]) or \
                                 not len([x for x in all_lpaps_musicgen[audio_input][target_prompt]]):
@@ -356,10 +362,10 @@ def calc_scores(clap_ckpt_name: str,
 
                             all_clap_musicgen[audio_input][target_prompt].append(
                                 {'score': calc_clap_win(clap_model, musicgen_aud, musicgen_aud_sr, target_prompt,
-                                                        win_length, method, overlap, device)})
+                                                        mg_win_length, method, overlap, device)})
                             all_lpaps_musicgen[audio_input][target_prompt].append(
                                 {'score': calc_lpaps_win(lpaps_model, musicgen_aud, orig_aud, musicgen_aud_sr,
-                                                         orig_aud_sr, win_length, method, overlap, device)})
+                                                         orig_aud_sr, mg_win_length, method, overlap, device)})
 
                         # CALC for SDEDIT
                         try:
